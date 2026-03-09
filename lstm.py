@@ -32,7 +32,7 @@ class LSTMCell:
 
 def forward(self, x_t, h_prev, c_prev, use_forget_gate=True):
         """
-        Passe avant (Forward Propagation) pour un pas de temps t.
+        Passe avant (Forward Propagation) pour un pas de temps t
         x_t : Entrée au temps t, dimension (input_size, 1)
         h_prev : État caché précédent h_{t-1}, dimension (hidden_size, 1)
         c_prev : État de la cellule précédent C_{t-1}, dimension (hidden_size, 1)
@@ -42,15 +42,14 @@ def forward(self, x_t, h_prev, c_prev, use_forget_gate=True):
         # np.vstack empile verticalement. Dimension finale : (hidden_size + input_size, 1)
         concat_x = np.vstack((h_prev, x_t))
         
-        # 2. Calcul des portes (Gates) avec produit matriciel (np.dot)
+        # 2. Calcul des portes avec produit matriciel
         
         # ABLATION STUDY
         if use_forget_gate:
             f_t = sigmoid(np.dot(self.W_f, concat_x) + self.b_f)
         else:
             # Si désactivée, on force la porte à 1 (le modèle n'oublie jamais rien de c_prev)
-            # Cela va saturer la mémoire et causer des instabilités à long terme
-            # mais c'est exactement ce que nous voulons tester
+            # Cela peut saturer la mémoire et causer des instabilités à long terme
             f_t = np.ones((self.hidden_size, 1))
             
         # Input Gate et Cell Candidate
@@ -65,9 +64,69 @@ def forward(self, x_t, h_prev, c_prev, use_forget_gate=True):
         o_t = sigmoid(np.dot(self.W_o, concat_x) + self.b_o)
         h_t = o_t * tanh(c_t)
         
-        # 5. CACHE POUR LA RÉTROPROPAGATION (Backpropagation)
+        # 5. CACHE POUR LA BACKPROPAGATION
         # On sauvegarde toutes les variables intermédiaires car on en aura 
-        # absolument besoin pour calculer les dérivées (Chain Rule) dans le backward()
+        # besoin pour calculer les dérivées (Chain rule) dans le backward()
         cache = (x_t, h_prev, c_prev, concat_x, f_t, i_t, c_bar, c_t, o_t, h_t)
         
         return h_t, c_t, cache
+
+
+def backward(self, dh_next, dc_next, cache):
+        """
+        Rétropropagation pour un pas de temps t (Backpropagation à travers le temps)
+        dh_next : Gradient de la loss par rapport à h_t, dimension (hidden_size, 1)
+        dc_next : Gradient de la loss par rapport à c_t, dimension (hidden_size, 1)
+        """
+        # 1. Récupération des variables sauvegardées lors du Forward (Indispensable pour la chain rule)
+        x_t, h_prev, c_prev, concat_x, f_t, i_t, c_bar, c_t, o_t, h_t = cache
+        
+        # 2. Gradient de l'état de la cellule (c_t)
+        # dc_t reçoit l'erreur de l'étape suivante (dc_next) + l'erreur venant de h_t
+        # h_t = o_t * tanh(c_t) alors dérivée partielle = o_t * (1 - tanh^2(c_t))
+        dc_t = dc_next + (dh_next * o_t * (1 - np.square(np.tanh(c_t))))
+        
+        # 3. Gradients des portes (Produit de Hadamard / élément par élément)
+        do_t = dh_next * np.tanh(c_t)
+        df_t = dc_t * c_prev
+        di_t = dc_t * c_bar
+        dc_bar = dc_t * i_t
+        
+        # 4. Application des dérivées locales (Chain rule sur sigmoide et tanh)
+        # Dérivée sigmoide = a * (1 - a) | Dérivée tanh = 1 - a^2
+        dZ_o = do_t * o_t * (1 - o_t)
+        dZ_f = df_t * f_t * (1 - f_t)
+        dZ_i = di_t * i_t * (1 - i_t)
+        dZ_c = dc_bar * (1 - np.square(c_bar))
+        
+        # 5. Calcul des gradients des poids (dJ/dW)
+        # dW = dZ * A_prev.T (Transposée de l'entrée)
+        # dimensions: (hidden_size, 1) dot (1, hidden_size + input_size) => (hidden_size, hidden_size + input_size)
+        self.dW_f = np.dot(dZ_f, concat_x.T)
+        self.db_f = np.sum(dZ_f, axis=1, keepdims=True)
+        
+        self.dW_i = np.dot(dZ_i, concat_x.T)
+        self.db_i = np.sum(dZ_i, axis=1, keepdims=True)
+        
+        self.dW_c = np.dot(dZ_c, concat_x.T)
+        self.db_c = np.sum(dZ_c, axis=1, keepdims=True)
+        
+        self.dW_o = np.dot(dZ_o, concat_x.T)
+        self.db_o = np.sum(dZ_o, axis=1, keepdims=True)
+        
+        # 6. Propagation de l'erreur vers l'entrée et le passé (dx_t, dh_prev)
+        # dZ_prev = W.T * dZ (On utilise W Transposé)
+        d_concat_x = (np.dot(self.W_f.T, dZ_f) + 
+                      np.dot(self.W_i.T, dZ_i) + 
+                      np.dot(self.W_c.T, dZ_c) + 
+                      np.dot(self.W_o.T, dZ_o))
+        
+        # On sépare le gradient concaténé pour retrouver dh_prev et dx_t
+        dh_prev = d_concat_x[:self.hidden_size, :]
+        dx_t = d_concat_x[self.hidden_size:, :]
+        
+        # Gradient de l'état de la cellule précédent
+        dc_prev = dc_t * f_t
+        
+        return dx_t, dh_prev, dc_prev
+
