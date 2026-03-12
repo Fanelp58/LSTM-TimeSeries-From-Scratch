@@ -2,7 +2,8 @@ import numpy as np
 
 def sigmoid(x):
     """Fonction d'activation sigmoïde utilisée pour les portes du LSTM"""
-    return 1 / (1 + np.exp(-x))
+    x_clipped = np.clip(x, -500, 500) # np.clip évite l'overflow de l'exponentielle
+    return 1 / (1 + np.exp(-x_clipped))
 
 def d_sigmoid(x):
     """Dérivée de la fonction sigmoïde pour le backpropagation"""
