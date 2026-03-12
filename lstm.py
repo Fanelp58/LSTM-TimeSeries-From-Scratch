@@ -2,6 +2,9 @@ import numpy as np
 from functions import sigmoid, tanh
 
 class LSTMCell:
+    """
+    Définition modulaire de la cellule LSTM
+    """
     def __init__(self, input_size, hidden_size):
         self.input_size = input_size
         self.hidden_size = hidden_size
@@ -15,7 +18,7 @@ class LSTMCell:
     
         # 1. Forget Gate (Porte d'oubli)
         self.W_f = np.random.uniform(-limit, limit, (hidden_size, concat_size))
-        self.b_f = np.zeros((hidden_size, 1))
+        self.b_f = np.ones((hidden_size, 1)) # ANTI-VANISHING GRADIENT : Initialisation de b_f à 1
         
         # 2. Input Gate (Porte d'entrée)
         self.W_i = np.random.uniform(-limit, limit, (hidden_size, concat_size))
@@ -30,7 +33,7 @@ class LSTMCell:
         self.b_o = np.zeros((hidden_size, 1))
 
 
-def forward(self, x_t, h_prev, c_prev, use_forget_gate=True):
+    def forward(self, x_t, h_prev, c_prev, use_forget_gate=True):
         """
         Passe avant (Forward Propagation) pour un pas de temps t
         x_t : Entrée au temps t, dimension (input_size, 1)
@@ -41,9 +44,7 @@ def forward(self, x_t, h_prev, c_prev, use_forget_gate=True):
         # 1. Concaténation de l'état caché précédent et de l'entrée
         # np.vstack empile verticalement. Dimension finale : (hidden_size + input_size, 1)
         concat_x = np.vstack((h_prev, x_t))
-        
-        # 2. Calcul des portes avec produit matriciel
-        
+                
         # ABLATION STUDY
         if use_forget_gate:
             f_t = sigmoid(np.dot(self.W_f, concat_x) + self.b_f)
@@ -72,46 +73,47 @@ def forward(self, x_t, h_prev, c_prev, use_forget_gate=True):
         return h_t, c_t, cache
 
 
-def backward(self, dh_next, dc_next, cache):
+    def backward(self, dh_next, dc_next, cache):
         """
-        Rétropropagation pour un pas de temps t (Backpropagation à travers le temps)
+        Rétropropagation pour un pas de temps t
         dh_next : Gradient de la loss par rapport à h_t, dimension (hidden_size, 1)
         dc_next : Gradient de la loss par rapport à c_t, dimension (hidden_size, 1)
         """
-        # 1. Récupération des variables sauvegardées lors du Forward (Indispensable pour la chain rule)
+        # 1. Récupération
         x_t, h_prev, c_prev, concat_x, f_t, i_t, c_bar, c_t, o_t, h_t = cache
         
         # 2. Gradient de l'état de la cellule (c_t)
-        # dc_t reçoit l'erreur de l'étape suivante (dc_next) + l'erreur venant de h_t
-        # h_t = o_t * tanh(c_t) alors dérivée partielle = o_t * (1 - tanh^2(c_t))
         dc_t = dc_next + (dh_next * o_t * (1 - np.square(np.tanh(c_t))))
         
-        # 3. Gradients des portes (Produit de Hadamard / élément par élément)
+        # 3. Gradients des portes (Hadammard product)
         do_t = dh_next * np.tanh(c_t)
         df_t = dc_t * c_prev
         di_t = dc_t * c_bar
         dc_bar = dc_t * i_t
         
-        # 4. Application des dérivées locales (Chain rule sur sigmoide et tanh)
-        # Dérivée sigmoide = a * (1 - a) | Dérivée tanh = 1 - a^2
+        # 4. Dérivées locales (C'est ici que s'applique l'ablation)
         dZ_o = do_t * o_t * (1 - o_t)
-        dZ_f = df_t * f_t * (1 - f_t)
         dZ_i = di_t * i_t * (1 - i_t)
         dZ_c = dc_bar * (1 - np.square(c_bar))
         
+        # APPLICATION CONDITIONNELLE : Si f_t est constant à 1, pas de gradient pour la Forget Gate (dérivée nulle)
+        if np.all(f_t == 0) or np.all(f_t == 1):
+            dZ_f = np.zeros_like(f_t)
+        else:
+            dZ_f = df_t * f_t * (1 - f_t)
+                
         # 5. Calcul des gradients des poids (dJ/dW)
         # dW = dZ * A_prev.T (Transposée de l'entrée)
         # dimensions: (hidden_size, 1) dot (1, hidden_size + input_size) => (hidden_size, hidden_size + input_size)
-        self.dW_f = np.dot(dZ_f, concat_x.T)
-        self.db_f = np.sum(dZ_f, axis=1, keepdims=True)
-        
+        self.dW_f = np.dot(dZ_f, concat_x.T)  
         self.dW_i = np.dot(dZ_i, concat_x.T)
-        self.db_i = np.sum(dZ_i, axis=1, keepdims=True)
-        
         self.dW_c = np.dot(dZ_c, concat_x.T)
-        self.db_c = np.sum(dZ_c, axis=1, keepdims=True)
-        
         self.dW_o = np.dot(dZ_o, concat_x.T)
+
+        # Calcul des gradients des biais (db)
+        self.db_f = np.sum(dZ_f, axis=1, keepdims=True)
+        self.db_i = np.sum(dZ_i, axis=1, keepdims=True)
+        self.db_c = np.sum(dZ_c, axis=1, keepdims=True)
         self.db_o = np.sum(dZ_o, axis=1, keepdims=True)
         
         # 6. Propagation de l'erreur vers l'entrée et le passé (dx_t, dh_prev)
