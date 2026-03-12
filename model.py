@@ -4,22 +4,23 @@ from lstm import LSTMCell
 class LSTMTimeSeriesModel:
     def __init__(self, input_size, hidden_size, output_size):
         """
-        Modèle complet de prédiction de séries temporelles.
+        Modèle complet de prédiction de séries temporelles (unrolling).
         """
         self.hidden_size = hidden_size
         
-        # 1. Instanciation de notre brique modulaire (Modularité exigée)
+        # 1. Instanciation de la cellule de base
         self.lstm_cell = LSTMCell(input_size, hidden_size)
         
-        # 2. Couche linéaire de sortie (Dense Layer) : Y = W_y * h_last + b_y
-        # Initialisation Xavier (Glorot) adaptée pour la sortie
+        # 2. Couche linéaire de sortie (Dense Layer)
+        # Initialisation Xavier (Glorot) adaptée pour la symétrie de la sortie
         limit = np.sqrt(1 / (hidden_size + output_size))
+
+        # Dimensions : W_y est (output_size, hidden_size) pour projeter l'état caché vers la prédiction
         self.W_y = np.random.uniform(-limit, limit, (output_size, hidden_size))
         self.b_y = np.zeros((output_size, 1))
 
     def forward(self, X_sequence, use_forget_gate=True):
         """
-        Dépliage temporel du LSTM
         X_sequence : Liste des entrées[x_1, x_2, ..., x_T]
         """
         self.caches =[]
@@ -43,7 +44,7 @@ class LSTMTimeSeriesModel:
 
     def backward(self, dy_pred):
         """
-        Rétropropagation à travers le temps.
+        Rétropropagation à travers le temps
         dy_pred : Gradient de la Loss par rapport à la prédiction
         """
         # 1. Gradient de la couche linéaire de sortie
@@ -75,14 +76,15 @@ class LSTMTimeSeriesModel:
             self.dW_i += self.lstm_cell.dW_i
             self.dW_c += self.lstm_cell.dW_c
             self.dW_o += self.lstm_cell.dW_o
-            self.db_f += self.lstm_cell.b_f
-            self.db_i += self.lstm_cell.b_i
-            self.db_c += self.lstm_cell.b_c
-            self.db_o += self.lstm_cell.b_o
+
+            self.db_f += self.lstm_cell.db_f
+            self.db_i += self.lstm_cell.db_i
+            self.db_c += self.lstm_cell.db_c
+            self.db_o += self.lstm_cell.db_o
 
     def update_params(self, learning_rate):
         """
-        Mise à jour des poids avec SGD (Stochastic Gradient Descent)
+        Mise à jour des poids avec SGD
         """
         # Mise à jour de la couche de sortie
         self.W_y -= learning_rate * self.dW_y
@@ -98,3 +100,5 @@ class LSTMTimeSeriesModel:
         self.lstm_cell.b_i -= learning_rate * self.db_i
         self.lstm_cell.b_c -= learning_rate * self.db_c
         self.lstm_cell.b_o -= learning_rate * self.db_o
+
+        
